@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Serverless Uptime Monitor
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 10
+    MemorySize: 256
+    Architectures:
+      - x86_64
+
+Resources:
+
+  MonitorsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-monitors'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: monitorId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: monitorId
+          KeyType: HASH
+
+  CreateMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/createMonitor.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MonitorsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+      Events:
+        CreateMonitor:
+          Type: Api
+          Properties:
+            Path: /monitors
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/createMonitor.ts
+
+Outputs:
+
+  ApiUrl:
+    Description: API Gateway endpoint
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
+
+  MonitorsTableName:
+    Description: DynamoDB monitors table
+    Value: !Ref MonitorsTable
