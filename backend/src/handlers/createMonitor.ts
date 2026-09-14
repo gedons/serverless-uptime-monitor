@@ -17,6 +17,14 @@ import {
   errorResponse
 } from "../utils/response.js";
 
+import {
+  validateMonitorUrl
+} from "../utils/urlSecurity.js";
+
+import {
+  getAuthenticatedUserId
+} from "../utils/auth.js";
+
 function isValidUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -119,8 +127,25 @@ export async function handler(
       );
     }
 
+    try {
+      await validateMonitorUrl(body.url);
+    } catch (urlErr: any) {
+      return errorResponse(
+        400,
+        urlErr.message || "Invalid or private monitoring URL"
+      );
+    }
+
+    let userId: string;
+    try {
+      userId = getAuthenticatedUserId(event);
+    } catch (authErr: any) {
+      return errorResponse(401, authErr.message || "Unauthorized");
+    }
+
     const monitor =
       await createMonitorService({
+        userId,
         name: body.name,
         url: body.url,
         method,

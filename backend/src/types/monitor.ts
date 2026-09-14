@@ -4,6 +4,7 @@ export type HttpMethod = "GET" | "HEAD";
 
 export interface Monitor {
   monitorId: string;
+  userId: string;
   name: string;
   url: string;
   method: HttpMethod;
@@ -11,6 +12,7 @@ export interface Monitor {
   timeout: number;
   enabled: boolean;
   status: MonitorStatus;
+  nextCheckAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -18,6 +20,7 @@ export interface Monitor {
 export interface CreateMonitorInput {
   name: string;
   url: string;
+  userId?: string;
   method?: HttpMethod;
   interval?: number;
   timeout?: number;

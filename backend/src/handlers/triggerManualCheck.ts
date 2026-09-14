@@ -3,7 +3,7 @@ import {
   APIGatewayProxyResult
 } from "aws-lambda";
 
-import { deleteMonitorService } from "../services/monitorService.js";
+import { triggerManualCheckService } from "../services/monitorService.js";
 import { successResponse, errorResponse } from "../utils/response.js";
 import { getAuthenticatedUserId } from "../utils/auth.js";
 
@@ -24,18 +24,18 @@ export async function handler(
       return errorResponse(400, "Monitor ID is required");
     }
 
-    const deleted = await deleteMonitorService(monitorId, userId);
+    const result = await triggerManualCheckService(monitorId, userId);
 
-    if (!deleted) {
+    if (!result) {
       return errorResponse(404, "Monitor not found");
     }
 
     return successResponse(200, {
-      message: "Monitor deleted successfully",
-      monitorId
+      monitor: result.monitor,
+      checkResult: result.checkResult
     });
   } catch (error) {
-    console.error("Failed to delete monitor:", error);
-    return errorResponse(500, "Failed to delete monitor");
+    console.error("Failed to trigger manual check:", error);
+    return errorResponse(500, "Failed to trigger manual check");
   }
 }

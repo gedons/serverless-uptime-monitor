@@ -3,7 +3,8 @@ import {
   APIGatewayProxyResult
 } from "aws-lambda";
 
-import { deleteMonitorService } from "../services/monitorService.js";
+import { getIncidentsByMonitorId } from "../repositories/incidentRepository.js";
+import { getOwnedMonitor } from "../repositories/monitorRepository.js";
 import { successResponse, errorResponse } from "../utils/response.js";
 import { getAuthenticatedUserId } from "../utils/auth.js";
 
@@ -24,18 +25,16 @@ export async function handler(
       return errorResponse(400, "Monitor ID is required");
     }
 
-    const deleted = await deleteMonitorService(monitorId, userId);
-
-    if (!deleted) {
+    const monitor = await getOwnedMonitor(monitorId, userId);
+    if (!monitor) {
       return errorResponse(404, "Monitor not found");
     }
 
-    return successResponse(200, {
-      message: "Monitor deleted successfully",
-      monitorId
-    });
+    const incidents = await getIncidentsByMonitorId(monitorId);
+
+    return successResponse(200, { incidents });
   } catch (error) {
-    console.error("Failed to delete monitor:", error);
-    return errorResponse(500, "Failed to delete monitor");
+    console.error("Failed to get monitor incidents:", error);
+    return errorResponse(500, "Failed to get monitor incidents");
   }
 }

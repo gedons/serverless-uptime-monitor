@@ -1,4 +1,5 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: '2010-09-10'
+
 Transform: AWS::Serverless-2016-10-31
 
 Description: Serverless Uptime Monitor
@@ -10,8 +11,49 @@ Globals:
     MemorySize: 256
     Architectures:
       - x86_64
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: "'*'"
+    Auth:
+      DefaultAuthorizer: CognitoAuthorizer
+      Authorizers:
+        CognitoAuthorizer:
+          UserPoolArn: !GetAtt UserPool.Arn
 
 Resources:
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub '${AWS::StackName}-user-pool'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub '${AWS::StackName}-user-pool-client'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
 
   MonitorsTable:
     Type: AWS::DynamoDB::Table
@@ -21,9 +63,78 @@ Resources:
       AttributeDefinitions:
         - AttributeName: monitorId
           AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
       KeySchema:
         - AttributeName: monitorId
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserMonitorsIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  CheckResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-check-results'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: checkId
+          AttributeType: S
+        - AttributeName: monitorId
+          AttributeType: S
+        - AttributeName: checkedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: checkId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: MonitorHistoryIndex
+          KeySchema:
+            - AttributeName: monitorId
+              KeyType: HASH
+            - AttributeName: checkedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  IncidentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-incidents'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: incidentId
+          AttributeType: S
+        - AttributeName: monitorId
+          AttributeType: S
+        - AttributeName: startedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: incidentId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: MonitorIncidentsIndex
+          KeySchema:
+            - AttributeName: monitorId
+              KeyType: HASH
+            - AttributeName: startedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alerts'
+
 
   CreateMonitorFunction:
     Type: AWS::Serverless::Function
@@ -51,12 +162,287 @@ Resources:
         EntryPoints:
           - src/handlers/createMonitor.ts
 
+  ListMonitorsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/listMonitors.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+      Events:
+        ListMonitors:
+          Type: Api
+          Properties:
+            Path: /monitors
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/listMonitors.ts
+
+  GetMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/getMonitor.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+      Events:
+        GetMonitor:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/getMonitor.ts
+
+  UpdateMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/updateMonitor.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MonitorsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+      Events:
+        UpdateMonitor:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/updateMonitor.ts
+
+  DeleteMonitorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/deleteMonitor.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MonitorsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+      Events:
+        DeleteMonitor:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/deleteMonitor.ts
+
+  GetCheckHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/getCheckHistory.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CheckResultsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+          CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+      Events:
+        GetCheckHistory:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}/checks
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/getCheckHistory.ts
+
+  TriggerManualCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/triggerManualCheck.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MonitorsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CheckResultsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+          CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+      Events:
+        TriggerManualCheck:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}/check
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/triggerManualCheck.ts
+
+  GetMonitorIncidentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/getMonitorIncidents.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentsTable
+      Events:
+        GetMonitorIncidents:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}/incidents
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/getMonitorIncidents.ts
+
+  GetMonitorStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/getMonitorStats.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CheckResultsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref IncidentsTable
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+          CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentsTable
+      Events:
+        GetMonitorStats:
+          Type: Api
+          Properties:
+            Path: /monitors/{monitorId}/stats
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/getMonitorStats.ts
+
+  MonitorWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: dist/handlers/monitorWorker.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MonitorsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CheckResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertTopic.TopicName
+      Environment:
+        Variables:
+          MONITORS_TABLE_NAME: !Ref MonitorsTable
+          CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentsTable
+          ALERT_TOPIC_ARN: !Ref AlertTopic
+      Events:
+        MonitorSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+            Description: Runs the uptime monitoring worker every minute
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - src/handlers/monitorWorker.ts
+
 Outputs:
 
   ApiUrl:
     Description: API Gateway endpoint
     Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/'
 
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+
+  AlertTopicArn:
+    Description: SNS Alert Topic ARN
+    Value: !Ref AlertTopic
+
   MonitorsTableName:
     Description: DynamoDB monitors table
     Value: !Ref MonitorsTable
+
+  CheckResultsTableName:
+    Description: DynamoDB check results table
+    Value: !Ref CheckResultsTable
