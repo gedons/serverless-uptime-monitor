@@ -1,47 +1,41 @@
-# Serverless Uptime Monitor - REST API Specification
+# REST API Specification — Serverless Uptime Monitor
 
-Base URL (Local/Staging): `https://<api-id>.execute-api.eu-west-1.amazonaws.com/Prod`
+**Base URL (Production):**
+```
+https://zwbk3hscmh.execute-api.eu-west-1.amazonaws.com/Prod
+```
 
 ---
 
 ## Authentication
 
-All REST API endpoints require a valid Amazon Cognito JWT ID Token passed in the `Authorization` header:
+All endpoints require a valid Amazon Cognito **ID Token** in the `Authorization` header:
 
-```text
+```
 Authorization: Bearer <COGNITO_ID_TOKEN>
 ```
 
-- Requests without a valid token return `401 Unauthorized`.
-- Resources (monitors, check history, incidents, stats) are strictly scoped to the authenticated user (`claims.sub`). Attempting to access another user's monitor returns `404 Not Found`.
+| Scenario | Response |
+|---|---|
+| Missing or invalid token | `401 Unauthorized` |
+| Valid token, wrong user's resource | `404 Not Found` |
+| Valid token, own resource | `200 / 201` as documented |
+
+Tokens are obtained via Cognito `InitiateAuth` (username+password flow) or the Nuxt 3 frontend's auth composable. Tokens expire after 1 hour; use the refresh token to get a new ID token.
 
 ---
 
-## Endpoints Summary
+## Endpoints
 
-| Method | Path | Description |
-| :--- | :--- | :--- |
-| `POST` | `/monitors` | Create a new endpoint monitor |
-| `GET` | `/monitors` | List all configured monitors for the authenticated user |
-| `GET` | `/monitors/{monitorId}` | Get details for a specific monitor (owned by user) |
-| `PATCH` | `/monitors/{monitorId}` | Update or pause/resume a monitor |
-| `DELETE` | `/monitors/{monitorId}` | Delete a monitor |
-| `POST` | `/monitors/{monitorId}/check` | Manually trigger an immediate health check |
-| `GET` | `/monitors/{monitorId}/checks` | Retrieve paginated check history |
-| `GET` | `/monitors/{monitorId}/incidents` | Retrieve outage and recovery timeline |
-| `GET` | `/monitors/{monitorId}/stats` | Retrieve aggregated uptime & response time statistics |
+### Monitors
 
----
+#### `POST /monitors`
+Create a new endpoint monitor.
 
-## Endpoint Details
-
-### 1. POST /monitors
-Creates a new uptime monitor. Automatically validates URL to prevent SSRF against private hostnames, loopbacks, and cloud metadata IPs.
-
-**Request Body:**
+**Request:**
 ```json
 {
-  "name": "Production API Gateway",
+  "name": "Production API",
   "url": "https://api.example.com/health",
   "method": "GET",
   "interval": 5,
@@ -49,76 +43,223 @@ Creates a new uptime monitor. Automatically validates URL to prevent SSRF agains
 }
 ```
 
-**Response (201 Created):**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | ✅ | Display label |
+| `url` | string | ✅ | Must be a valid HTTPS URL. Private IPs, loopbacks, and cloud metadata URLs are rejected (SSRF protection). |
+| `method` | string | ✅ | `GET`, `POST`, `HEAD`, etc. |
+| `interval` | number | ✅ | Check frequency in minutes (min: 1) |
+| `timeout` | number | ✅ | Request timeout in seconds |
+
+**Response `201 Created`:**
 ```json
 {
   "monitor": {
     "monitorId": "mon_a1b2c3d4",
-    "name": "Production API Gateway",
+    "userId": "cognito-sub-uuid",
+    "name": "Production API",
     "url": "https://api.example.com/health",
     "method": "GET",
     "interval": 5,
     "timeout": 10,
     "enabled": true,
     "status": "UNKNOWN",
-    "nextCheckAt": "2026-09-14T13:05:00.000Z",
-    "createdAt": "2026-09-14T13:00:00.000Z",
-    "updatedAt": "2026-09-14T13:00:00.000Z"
+    "nextCheckAt": "2026-09-15T14:05:00.000Z",
+    "createdAt": "2026-09-15T14:00:00.000Z",
+    "updatedAt": "2026-09-15T14:00:00.000Z"
   }
 }
 ```
 
+**Errors:**
+- `400` — Missing required fields or SSRF-blocked URL
+- `401` — Unauthenticated
+
 ---
 
-### 2. GET /monitors
-Lists all monitors.
+#### `GET /monitors`
+List all monitors for the authenticated user.
 
-**Response (200 OK):**
+**Response `200 OK`:**
 ```json
 {
-  "monitors": [ ... ],
+  "monitors": [
+    {
+      "monitorId": "mon_a1b2c3d4",
+      "name": "Production API",
+      "url": "https://api.example.com/health",
+      "status": "UP",
+      "enabled": true,
+      "interval": 5,
+      "nextCheckAt": "2026-09-15T14:10:00.000Z"
+    }
+  ],
   "count": 1
 }
 ```
 
 ---
 
-### 3. GET /monitors/{monitorId}
-Returns a single monitor by ID.
+#### `GET /monitors/{monitorId}`
+Get a single monitor by ID.
+
+**Response `200 OK`:** Full monitor object (same shape as create response).
+
+**Errors:**
+- `404` — Monitor not found or belongs to another user
 
 ---
 
-### 4. PATCH /monitors/{monitorId}
-Updates properties or toggles `enabled` state (Pause/Resume).
+#### `PATCH /monitors/{monitorId}`
+Update monitor properties or toggle enabled state (pause/resume).
 
-**Request Body:**
+**Request** (all fields optional):
 ```json
 {
+  "name": "Renamed Monitor",
+  "url": "https://new-url.example.com/health",
+  "method": "HEAD",
+  "interval": 10,
+  "timeout": 15,
   "enabled": false
+}
+```
+
+**Response `200 OK`:** Updated monitor object.
+
+---
+
+#### `DELETE /monitors/{monitorId}`
+Permanently delete a monitor and **all associated check results and incidents** (cascade delete).
+
+**Response `200 OK`:**
+```json
+{ "message": "Monitor deleted successfully" }
+```
+
+---
+
+### Health Checks
+
+#### `POST /monitors/{monitorId}/check`
+Trigger an immediate, synchronous health check. Updates monitor status in real time.
+
+**Response `200 OK`:**
+```json
+{
+  "result": {
+    "checkId": "chk_xyz123",
+    "monitorId": "mon_a1b2c3d4",
+    "status": "UP",
+    "httpStatus": 200,
+    "responseTime": 142,
+    "checkedAt": "2026-09-15T14:08:00.000Z"
+  }
 }
 ```
 
 ---
 
-### 5. DELETE /monitors/{monitorId}
-Deletes a monitor record.
+#### `GET /monitors/{monitorId}/checks`
+Retrieve paginated check history, sorted by `checkedAt` descending.
+
+**Query Parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `limit` | number | 50 | Max results per page |
+| `nextToken` | string | — | Pagination cursor from previous response |
+
+**Response `200 OK`:**
+```json
+{
+  "checks": [
+    {
+      "checkId": "chk_xyz123",
+      "monitorId": "mon_a1b2c3d4",
+      "status": "UP",
+      "httpStatus": 200,
+      "responseTime": 142,
+      "checkedAt": "2026-09-15T14:08:00.000Z"
+    }
+  ],
+  "count": 1,
+  "nextToken": null
+}
+```
 
 ---
 
-### 6. POST /monitors/{monitorId}/check
-Triggers an immediate check and updates monitor status.
+### Incidents
+
+#### `GET /monitors/{monitorId}/incidents`
+Retrieve the outage and recovery timeline for a monitor.
+
+**Response `200 OK`:**
+```json
+{
+  "incidents": [
+    {
+      "incidentId": "inc_abc987",
+      "monitorId": "mon_a1b2c3d4",
+      "status": "RESOLVED",
+      "startedAt": "2026-09-15T12:00:00.000Z",
+      "resolvedAt": "2026-09-15T12:15:00.000Z",
+      "durationSeconds": 900
+    },
+    {
+      "incidentId": "inc_def456",
+      "monitorId": "mon_a1b2c3d4",
+      "status": "OPEN",
+      "startedAt": "2026-09-15T14:00:00.000Z",
+      "resolvedAt": null,
+      "durationSeconds": null
+    }
+  ],
+  "count": 2
+}
+```
 
 ---
 
-### 7. GET /monitors/{monitorId}/checks
-Queries check history. Supports `limit` (default 50) and `nextToken` pagination.
+### Statistics
+
+#### `GET /monitors/{monitorId}/stats`
+Aggregated uptime and performance statistics.
+
+**Response `200 OK`:**
+```json
+{
+  "stats": {
+    "monitorId": "mon_a1b2c3d4",
+    "uptimePercent": 98.5,
+    "totalChecks": 1440,
+    "upChecks": 1418,
+    "downChecks": 22,
+    "avgResponseTime": 187,
+    "minResponseTime": 89,
+    "maxResponseTime": 2341,
+    "totalIncidents": 3
+  }
+}
+```
 
 ---
 
-### 8. GET /monitors/{monitorId}/incidents
-Lists outages (`OPEN`) and resolved incidents with start time, resolution time, and outage duration.
+## Error Response Format
 
----
+All error responses follow this shape:
 
-### 9. GET /monitors/{monitorId}/stats
-Computes uptime %, average latency, min/max response times, and total incidents.
+```json
+{
+  "error": "Human-readable error message"
+}
+```
+
+| Status Code | Meaning |
+|---|---|
+| `400 Bad Request` | Invalid input, missing fields, or SSRF-blocked URL |
+| `401 Unauthorized` | Missing or invalid Cognito token |
+| `403 Forbidden` | Token valid, action not permitted |
+| `404 Not Found` | Resource doesn't exist or belongs to another user |
+| `500 Internal Server Error` | Unexpected Lambda/AWS error |
