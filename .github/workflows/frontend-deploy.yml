@@ -1,4 +1,4 @@
-name: Frontend CI/CD
+name: Frontend CI Validation
 
 on:
   push:
@@ -7,11 +7,12 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/frontend-deploy.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'frontend/**'
   workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read
 
 jobs:
   validate-and-build:
@@ -36,36 +37,7 @@ jobs:
         run: npm run build
         working-directory: frontend
         env:
-          NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE }}
+          NUXT_PUBLIC_API_BASE: https://zwbk3hscmh.execute-api.eu-west-1.amazonaws.com/Prod
           NUXT_PUBLIC_AWS_REGION: eu-west-1
-          NUXT_PUBLIC_COGNITO_USER_POOL_ID: ${{ secrets.NUXT_PUBLIC_COGNITO_USER_POOL_ID }}
-          NUXT_PUBLIC_COGNITO_CLIENT_ID: ${{ secrets.NUXT_PUBLIC_COGNITO_CLIENT_ID }}
-
-  deploy-amplify:
-    name: Deploy to AWS Amplify Hosting
-    needs: validate-and-build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: eu-west-1
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          role-session-name: GitHubActions-Amplify-Deploy
-
-      - name: Trigger AWS Amplify Deployment
-        run: |
-          aws amplify start-deployment \
-            --app-id ${{ secrets.AMPLIFY_APP_ID }} \
-            --branch-name master \
-            --job-id ${{ github.sha }} || echo  Amplify app deployment triggered or configured via Amplify webhook / auto-build
+          NUXT_PUBLIC_COGNITO_USER_POOL_ID: eu-west-1_6n4TmoNJP
+          NUXT_PUBLIC_COGNITO_CLIENT_ID: 744in2go42gdb136r1hm90tqs9
