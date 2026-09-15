@@ -22,7 +22,8 @@ import {
 } from "../utils/urlSecurity.js";
 
 import {
-  getAuthenticatedUserId
+  getAuthenticatedUserId,
+  getAuthenticatedUserEmail
 } from "../utils/auth.js";
 
 function isValidUrl(value: string): boolean {
@@ -137,8 +138,10 @@ export async function handler(
     }
 
     let userId: string;
+    let userEmail: string | undefined;
     try {
       userId = getAuthenticatedUserId(event);
+      userEmail = getAuthenticatedUserEmail(event);
     } catch (authErr: any) {
       return errorResponse(401, authErr.message || "Unauthorized");
     }
@@ -146,6 +149,7 @@ export async function handler(
     const monitor =
       await createMonitorService({
         userId,
+        userEmail,
         name: body.name,
         url: body.url,
         method,

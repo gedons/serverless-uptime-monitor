@@ -1,8 +1,14 @@
-AWSTemplateFormatVersion: '2010-09-10'
+AWSTemplateFormatVersion: '2010-09-09'
 
 Transform: AWS::Serverless-2016-10-31
 
 Description: Serverless Uptime Monitor
+
+Parameters:
+  FrontendCorsOrigin:
+    Type: String
+    Default: "http://localhost:3000"
+    Description: Allowed CORS Origin
 
 Globals:
   Function:
@@ -11,18 +17,39 @@ Globals:
     MemorySize: 256
     Architectures:
       - x86_64
+
   Api:
     Cors:
       AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
       AllowHeaders: "'Content-Type,Authorization'"
-      AllowOrigin: "'*'"
+      AllowOrigin: !Sub "'${FrontendCorsOrigin}'"
+
     Auth:
       DefaultAuthorizer: CognitoAuthorizer
+      AddDefaultAuthorizerToCorsPreflight: false
       Authorizers:
         CognitoAuthorizer:
           UserPoolArn: !GetAtt UserPool.Arn
 
 Resources:
+
+  GatewayResponseDefault4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseType: DEFAULT_4XX
+      RestApiId: !Ref ServerlessRestApi
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+
+  GatewayResponseDefault5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseType: DEFAULT_5XX
+      RestApiId: !Ref ServerlessRestApi
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -248,9 +275,15 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MonitorsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CheckResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
       Environment:
         Variables:
           MONITORS_TABLE_NAME: !Ref MonitorsTable
+          CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentsTable
       Events:
         DeleteMonitor:
           Type: Api
@@ -305,16 +338,25 @@ Resources:
             TableName: !Ref MonitorsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CheckResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IncidentsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
       Environment:
         Variables:
           MONITORS_TABLE_NAME: !Ref MonitorsTable
           CHECK_RESULTS_TABLE_NAME: !Ref CheckResultsTable
+          INCIDENTS_TABLE_NAME: !Ref IncidentsTable
       Events:
         TriggerManualCheck:
           Type: Api
           Properties:
             Path: /monitors/{monitorId}/check
             Method: POST
+
     Metadata:
       BuildMethod: esbuild
       BuildProperties:
@@ -391,7 +433,7 @@ Resources:
       CodeUri: ../backend/
       Handler: dist/handlers/monitorWorker.handler
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref MonitorsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CheckResultsTable
@@ -399,6 +441,11 @@ Resources:
             TableName: !Ref IncidentsTable
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt AlertTopic.TopicName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
       Environment:
         Variables:
           MONITORS_TABLE_NAME: !Ref MonitorsTable
@@ -446,3 +493,7 @@ Outputs:
   CheckResultsTableName:
     Description: DynamoDB check results table
     Value: !Ref CheckResultsTable
+
+  IncidentsTableName:
+    Description: DynamoDB incidents table
+    Value: !Ref IncidentsTable

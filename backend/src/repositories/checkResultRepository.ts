@@ -5,7 +5,8 @@ import {
 import {
   DynamoDBDocumentClient,
   PutCommand,
-  QueryCommand
+  QueryCommand,
+  BatchWriteCommand
 } from "@aws-sdk/lib-dynamodb";
 
 import { CheckResult } from "../types/checkResult.js";
@@ -62,4 +63,47 @@ export async function getCheckHistoryByMonitorId(
     items,
     nextToken
   };
+}
+
+export async function deleteCheckResultsByMonitorId(
+  monitorId: string
+): Promise<void> {
+  let lastEvaluatedKey: Record<string, any> | undefined;
+
+  do {
+    const queryResult = await dynamoDb.send(
+      new QueryCommand({
+        TableName: getTableName(),
+        IndexName: "MonitorHistoryIndex",
+        KeyConditionExpression: "monitorId = :monitorId",
+        ExpressionAttributeValues: {
+          ":monitorId": monitorId
+        },
+        ExclusiveStartKey: lastEvaluatedKey
+      })
+    );
+
+    const items = queryResult.Items || [];
+    lastEvaluatedKey = queryResult.LastEvaluatedKey;
+
+    if (items.length > 0) {
+      // DynamoDB BatchWriteItem supports up to 25 requests per batch
+      for (let i = 0; i < items.length; i += 25) {
+        const batch = items.slice(i, i + 25);
+        const deleteRequests = batch.map((item) => ({
+          DeleteRequest: {
+            Key: { checkId: item.checkId }
+          }
+        }));
+
+        await dynamoDb.send(
+          new BatchWriteCommand({
+            RequestItems: {
+              [getTableName()]: deleteRequests
+            }
+          })
+        );
+      }
+    }
+  } while (lastEvaluatedKey);
 }

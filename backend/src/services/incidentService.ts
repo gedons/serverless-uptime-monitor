@@ -37,10 +37,11 @@ export async function processMonitorStatusTransition(
         httpStatus: checkResult.httpStatus
       });
 
-      // Trigger SNS Alert
+      // Trigger SES Email Alert
       await sendDowntimeNotification(
         monitor.name,
         monitor.url,
+        monitor.userEmail,
         checkResult.error,
         checkResult.httpStatus
       );
@@ -66,6 +67,7 @@ export async function processMonitorStatusTransition(
       await sendRecoveryNotification(
         monitor.name,
         monitor.url,
+        monitor.userEmail,
         durationSeconds
       );
     }

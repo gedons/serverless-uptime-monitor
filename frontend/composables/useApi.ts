@@ -3,7 +3,7 @@ import { useAuth } from "./useAuth";
 export const useApi = () => {
   const config = useRuntimeConfig();
   const baseUrl = config.public.apiBase || "http://localhost:3000";
-  const { getAccessToken, signOut } = useAuth();
+  const { getIdToken, signOut } = useAuth();
 
   const fetchApi = async <T>(
     endpoint: string,
@@ -12,7 +12,12 @@ export const useApi = () => {
     const url = `${baseUrl.replace(/\/$/, "")}${endpoint}`;
 
     // Retrieve the current Cognito ID token
-    const token = await getAccessToken();
+    const token = await getIdToken();
+
+    if (!token && import.meta.client) {
+      signOut();
+      throw new Error("Session expired. Please log in again.");
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -30,11 +35,13 @@ export const useApi = () => {
       });
       return response;
     } catch (error: any) {
-      // Handle authentication failures
+      // Handle authentication failures and network errors
       const status = error?.response?.status || error?.status || error?.statusCode;
-      if (status === 401) {
-        signOut();
-        throw new Error("Session expired. Please log in again.");
+      if (status === 401 || error?.name === "FetchError" || !status) {
+        if (import.meta.client && (status === 401 || !token)) {
+          signOut();
+          throw new Error("Session expired. Please log in again.");
+        }
       }
 
       const message =

@@ -22,3 +22,17 @@ export function getAuthenticatedUserId(event: APIGatewayProxyEvent): string {
 
   throw new Error("Unauthorized: Missing authenticated user identity");
 }
+
+export function getAuthenticatedUserEmail(event: APIGatewayProxyEvent): string | undefined {
+  const claims = event.requestContext?.authorizer?.claims;
+  if (claims && typeof claims.email === "string" && claims.email.trim().length > 0) {
+    return claims.email.trim();
+  }
+
+  const jwtClaims = (event.requestContext?.authorizer as any)?.jwt?.claims;
+  if (jwtClaims && typeof jwtClaims.email === "string" && jwtClaims.email.trim().length > 0) {
+    return jwtClaims.email.trim();
+  }
+
+  return undefined;
+}

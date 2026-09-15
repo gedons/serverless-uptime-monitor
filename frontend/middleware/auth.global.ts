@@ -1,18 +1,13 @@
 import { useAuth } from "~/composables/useAuth";
 
 export default defineNuxtRouteMiddleware(async (to) => {
-  const { isAuthenticated, initAuth } = useAuth();
+  const { isAuthenticated, isInitialized, initAuth } = useAuth();
 
   // Protected routes that require authentication
   const protectedPaths = ["/dashboard", "/monitors"];
 
   // Guest-only routes (logged-in users get redirected to dashboard)
   const guestOnlyPaths = ["/login", "/register", "/confirm-account", "/forgot-password"];
-
-  // Restore session from local storage if not already done
-  if (!isAuthenticated.value) {
-    await initAuth();
-  }
 
   const isProtected = protectedPaths.some(
     (path) => to.path === path || to.path.startsWith(path + "/")
@@ -22,12 +17,25 @@ export default defineNuxtRouteMiddleware(async (to) => {
     (path) => to.path === path || to.path.startsWith(path + "/")
   );
 
-  // Redirect unauthenticated users away from protected pages
+  // During SSR, browser localStorage cannot be accessed.
+  // Allow page hydration on client where session restoration and route guarding take place.
+  if (import.meta.server) {
+    return;
+  }
+
+  // On client, only block navigation for protected routes if session is not yet initialized.
+  // Guest routes transition instantly while auth initialization runs in the background.
+  if (isProtected && !isInitialized.value) {
+    await initAuth();
+  } else if (!isInitialized.value) {
+    initAuth();
+  }
+
+  // Client-side route guarding
   if (isProtected && !isAuthenticated.value) {
     return navigateTo("/login");
   }
 
-  // Redirect authenticated users away from guest-only pages
   if (isGuestOnly && isAuthenticated.value) {
     return navigateTo("/dashboard");
   }

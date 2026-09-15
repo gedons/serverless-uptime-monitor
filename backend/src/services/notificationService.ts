@@ -1,16 +1,16 @@
-import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
-const snsClient = new SNSClient({});
-const topicArn = process.env.ALERT_TOPIC_ARN;
+const sesClient = new SESClient({});
 
 export async function sendDowntimeNotification(
   monitorName: string,
   url: string,
+  userEmail?: string,
   error?: string,
   httpStatus?: number
 ): Promise<void> {
-  if (!topicArn) {
-    console.warn("ALERT_TOPIC_ARN is not configured, skipping downtime alert.");
+  if (!userEmail) {
+    console.warn(`No user email associated with monitor ${monitorName}, skipping email alert.`);
     return;
   }
 
@@ -27,26 +27,30 @@ export async function sendDowntimeNotification(
     .join("\n");
 
   try {
-    await snsClient.send(
-      new PublishCommand({
-        TopicArn: topicArn,
-        Subject: subject,
-        Message: message
+    await sesClient.send(
+      new SendEmailCommand({
+        Source: userEmail,
+        Destination: { ToAddresses: [userEmail] },
+        Message: {
+          Subject: { Data: subject },
+          Body: { Text: { Data: message } }
+        }
       })
     );
-    console.log(`Downtime notification sent for ${monitorName}`);
+    console.log(`Downtime email notification sent to ${userEmail} for ${monitorName}`);
   } catch (err) {
-    console.error("Failed to send downtime notification:", err);
+    console.error(`Failed to send downtime email to ${userEmail}:`, err);
   }
 }
 
 export async function sendRecoveryNotification(
   monitorName: string,
   url: string,
+  userEmail?: string,
   durationSeconds?: number
 ): Promise<void> {
-  if (!topicArn) {
-    console.warn("ALERT_TOPIC_ARN is not configured, skipping recovery alert.");
+  if (!userEmail) {
+    console.warn(`No user email associated with monitor ${monitorName}, skipping recovery alert.`);
     return;
   }
 
@@ -64,15 +68,18 @@ export async function sendRecoveryNotification(
   ].join("\n");
 
   try {
-    await snsClient.send(
-      new PublishCommand({
-        TopicArn: topicArn,
-        Subject: subject,
-        Message: message
+    await sesClient.send(
+      new SendEmailCommand({
+        Source: userEmail,
+        Destination: { ToAddresses: [userEmail] },
+        Message: {
+          Subject: { Data: subject },
+          Body: { Text: { Data: message } }
+        }
       })
     );
-    console.log(`Recovery notification sent for ${monitorName}`);
+    console.log(`Recovery email notification sent to ${userEmail} for ${monitorName}`);
   } catch (err) {
-    console.error("Failed to send recovery notification:", err);
+    console.error(`Failed to send recovery email to ${userEmail}:`, err);
   }
 }

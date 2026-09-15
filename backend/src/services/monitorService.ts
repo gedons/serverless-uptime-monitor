@@ -19,8 +19,10 @@ import {
 
 import {
   createCheckResult,
-  getCheckHistoryByMonitorId
+  getCheckHistoryByMonitorId,
+  deleteCheckResultsByMonitorId
 } from "../repositories/checkResultRepository.js";
+import { deleteIncidentsByMonitorId } from "../repositories/incidentRepository.js";
 
 import { checkUrl } from "./httpChecker.js";
 import { validateMonitorUrl } from "../utils/urlSecurity.js";
@@ -31,13 +33,13 @@ export async function createMonitorService(
 
   const now = new Date().toISOString();
 
-  const nextCheckAt = new Date(
-    Date.now() + (input.interval ?? 5) * 60 * 1000
-  ).toISOString();
+  // Set nextCheckAt to current time so the scheduled worker picks it up immediately
+  const nextCheckAt = now;
 
   const monitor: Monitor = {
     monitorId: `mon_${randomUUID()}`,
     userId: input.userId,
+    userEmail: input.userEmail,
     name: input.name.trim(),
     url: input.url.trim(),
     method: input.method ?? "GET",
@@ -113,6 +115,13 @@ export async function deleteMonitorService(
   if (!existing) {
     return false;
   }
+
+  // Delete all associated check results & incidents from DynamoDB
+  await Promise.allSettled([
+    deleteCheckResultsByMonitorId(monitorId),
+    deleteIncidentsByMonitorId(monitorId)
+  ]);
+
   return deleteMonitor(monitorId);
 }
 

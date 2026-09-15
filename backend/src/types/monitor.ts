@@ -5,6 +5,7 @@ export type HttpMethod = "GET" | "HEAD";
 export interface Monitor {
   monitorId: string;
   userId: string;
+  userEmail?: string;
   name: string;
   url: string;
   method: HttpMethod;
@@ -21,6 +22,7 @@ export interface CreateMonitorInput {
   name: string;
   url: string;
   userId?: string;
+  userEmail?: string;
   method?: HttpMethod;
   interval?: number;
   timeout?: number;

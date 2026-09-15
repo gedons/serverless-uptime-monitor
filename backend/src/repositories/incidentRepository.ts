@@ -3,7 +3,8 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
-  UpdateCommand
+  UpdateCommand,
+  BatchWriteCommand
 } from "@aws-sdk/lib-dynamodb";
 
 import { Incident } from "../types/incident.js";
@@ -97,4 +98,48 @@ export async function getIncidentsByMonitorId(
   );
 
   return (result.Items ?? []) as Incident[];
+}
+
+export async function deleteIncidentsByMonitorId(
+  monitorId: string
+): Promise<void> {
+  if (!tableName) return;
+
+  let lastEvaluatedKey: Record<string, any> | undefined;
+
+  do {
+    const queryResult = await dynamoDb.send(
+      new QueryCommand({
+        TableName: tableName,
+        IndexName: "MonitorIncidentsIndex",
+        KeyConditionExpression: "monitorId = :monitorId",
+        ExpressionAttributeValues: {
+          ":monitorId": monitorId
+        },
+        ExclusiveStartKey: lastEvaluatedKey
+      })
+    );
+
+    const items = queryResult.Items || [];
+    lastEvaluatedKey = queryResult.LastEvaluatedKey;
+
+    if (items.length > 0) {
+      for (let i = 0; i < items.length; i += 25) {
+        const batch = items.slice(i, i + 25);
+        const deleteRequests = batch.map((item) => ({
+          DeleteRequest: {
+            Key: { incidentId: item.incidentId }
+          }
+        }));
+
+        await dynamoDb.send(
+          new BatchWriteCommand({
+            RequestItems: {
+              [tableName]: deleteRequests
+            }
+          })
+        );
+      }
+    }
+  } while (lastEvaluatedKey);
 }

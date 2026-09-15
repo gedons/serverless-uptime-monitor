@@ -2,9 +2,18 @@
   <div class="space-y-6">
     <!-- Header Navigation -->
     <div class="flex items-center justify-between">
-      <NuxtLink to="/monitors" class="p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 transition-colors">
-        ← Back to Monitors
-      </NuxtLink>
+      <div class="flex items-center space-x-3">
+        <NuxtLink to="/monitors" class="p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 transition-colors">
+          ← Back to Monitors
+        </NuxtLink>
+        <div class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-400">
+          <span class="relative flex h-2 w-2">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          <span>Live Polling (10s)</span>
+        </div>
+      </div>
       
       <div v-if="monitor" class="flex items-center space-x-3">
         <button
@@ -106,6 +115,49 @@
         </div>
       </div>
 
+      <!-- Analytics & Charts Section -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Latency Line Chart -->
+        <div class="lg:col-span-2 p-6 rounded-2xl bg-slate-900 border border-slate-800/80 shadow-xl space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold uppercase tracking-wider text-slate-300">Response Time History (ms)</h3>
+            <span class="text-xs text-slate-500 font-mono">Last 50 checks</span>
+          </div>
+          <div class="h-64">
+            <ClientOnly>
+              <Line v-if="lineChartData.labels.length" :data="lineChartData" :options="lineChartOptions" />
+              <div v-else class="h-full flex items-center justify-center text-slate-500 text-xs font-mono">
+                No latency history recorded yet
+              </div>
+            </ClientOnly>
+          </div>
+        </div>
+
+        <!-- Uptime Doughnut Chart -->
+        <div class="p-6 rounded-2xl bg-slate-900 border border-slate-800/80 shadow-xl space-y-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold uppercase tracking-wider text-slate-300">Uptime Ratio</h3>
+            <span class="text-xs font-mono font-bold text-emerald-400" v-if="stats">{{ stats.uptimePercentage }}%</span>
+          </div>
+          <div class="h-52 relative flex items-center justify-center">
+            <ClientOnly>
+              <Doughnut v-if="doughnutChartData.datasets[0].data.some(v => v > 0)" :data="doughnutChartData" :options="doughnutChartOptions" />
+              <div v-else class="text-slate-500 text-xs font-mono">No uptime statistics</div>
+            </ClientOnly>
+          </div>
+          <div class="flex justify-center space-x-6 text-xs font-mono">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+              <span class="text-slate-300">UP</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+              <span class="text-slate-300">DOWN</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Check History & Incidents Tabs -->
       <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 shadow-xl space-y-4">
         <div class="flex items-center space-x-6 border-b border-slate-800 pb-3">
@@ -204,9 +256,32 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useApi } from "~/composables/useApi";
+import { Line, Doughnut } from "vue-chartjs";
+import {
+  Chart as ChartJS,
+  Title,
+  Tooltip,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  CategoryScale,
+  ArcElement
+} from "chart.js";
+
+ChartJS.register(
+  Title,
+  Tooltip,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  CategoryScale,
+  ArcElement
+);
 
 const route = useRoute();
 const router = useRouter();
@@ -224,8 +299,10 @@ const error = ref(null);
 const activeTab = ref("history");
 const showDeleteModal = ref(false);
 
-const loadData = async () => {
-  loading.value = true;
+let pollInterval = null;
+
+const loadData = async (isSilent = false) => {
+  if (!isSilent) loading.value = true;
   error.value = null;
 
   try {
@@ -238,7 +315,7 @@ const loadData = async () => {
 
     if (monRes.status === "fulfilled") {
       monitor.value = monRes.value.monitor;
-    } else {
+    } else if (!isSilent) {
       error.value = "Monitor not found";
       return;
     }
@@ -247,17 +324,89 @@ const loadData = async () => {
     if (histRes.status === "fulfilled") historyItems.value = histRes.value.items || [];
     if (incRes.status === "fulfilled") incidents.value = incRes.value.incidents || [];
   } catch (err) {
-    error.value = err.message || "Failed to load monitor details";
+    if (!isSilent) error.value = err.message || "Failed to load monitor details";
   } finally {
-    loading.value = false;
+    if (!isSilent) loading.value = false;
   }
+};
+
+// Response Time Line Chart Data
+const lineChartData = computed(() => {
+  const reversed = [...historyItems.value].reverse();
+  return {
+    labels: reversed.map((c) => {
+      const date = new Date(c.checkedAt);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }),
+    datasets: [
+      {
+        label: "Response Time (ms)",
+        data: reversed.map((c) => (c.status === "UP" ? c.responseTime ?? 0 : null)),
+        borderColor: "#10b981",
+        backgroundColor: "rgba(16, 185, 129, 0.1)",
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: reversed.map((c) => (c.status === "UP" ? "#10b981" : "#f43f5e")),
+        spanGaps: false
+      }
+    ]
+  };
+});
+
+const lineChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: (ctx) => `${ctx.parsed.y !== null ? ctx.parsed.y + ' ms' : 'DOWN'}`
+      }
+    }
+  },
+  scales: {
+    x: {
+      grid: { color: "#1e293b" },
+      ticks: { color: "#64748b", font: { size: 10 } }
+    },
+    y: {
+      grid: { color: "#1e293b" },
+      ticks: { color: "#64748b", font: { size: 10 } },
+      beginAtZero: true
+    }
+  }
+};
+
+// Uptime Doughnut Chart Data
+const doughnutChartData = computed(() => {
+  const up = historyItems.value.filter((c) => c.status === "UP").length;
+  const down = historyItems.value.filter((c) => c.status === "DOWN").length;
+  return {
+    labels: ["UP", "DOWN"],
+    datasets: [
+      {
+        data: [up, down],
+        backgroundColor: ["#10b981", "#f43f5e"],
+        borderWidth: 0
+      }
+    ]
+  };
+});
+
+const doughnutChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false }
+  },
+  cutout: "75%"
 };
 
 const triggerCheck = async () => {
   checking.value = true;
   try {
     await api.triggerCheck(monitorId);
-    await loadData();
+    await loadData(true);
   } catch (err) {
     alert(err.message || "Check failed");
   } finally {
@@ -268,7 +417,7 @@ const triggerCheck = async () => {
 const toggleEnable = async () => {
   try {
     await api.updateMonitor(monitorId, { enabled: !monitor.value.enabled });
-    await loadData();
+    await loadData(true);
   } catch (err) {
     alert(err.message || "Failed to update monitor state");
   }
@@ -296,5 +445,13 @@ const formatDate = (iso) => {
 
 onMounted(() => {
   loadData();
+  // 10 second live polling
+  pollInterval = setInterval(() => {
+    loadData(true);
+  }, 10000);
+});
+
+onUnmounted(() => {
+  if (pollInterval) clearInterval(pollInterval);
 });
 </script>
