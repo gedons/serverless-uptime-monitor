@@ -12,7 +12,7 @@ A production-ready serverless uptime monitoring platform built with AWS Lambda, 
 - **Incident Detection & Tracking**: Automatically detects `UP` $\leftrightarrow$ `DOWN` transitions, opens incidents, records outage duration, and resolves incidents on recovery.
 - **SNS Notifications**: Real-time email alerts sent via AWS SNS topic when services go down or recover.
 - **Complete REST API**: Multi-tenant user isolation (UserMonitorsIndex), monitor CRUD, history querying, manual check triggers, incident timelines, and aggregated uptime stats.
-- **Nuxt 3 Dashboard**: Polished SaaS interface with Cognito sign-in, account confirmation, password reset, Vue 3, Tailwind CSS, status indicators, and responsive management views.
+- **Nuxt 3 Dashboard**: Polished SaaS interface with Cognito sign-in, account confirmation, password reset, Vue 3, Tailwind CSS, status indicators, and responsive management views..
 
 ---
 
