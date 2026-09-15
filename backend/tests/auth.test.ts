@@ -3,7 +3,7 @@ import { getAuthenticatedUserId } from "../src/utils/auth.js";
 import { APIGatewayProxyEvent } from "aws-lambda";
 
 describe("auth - getAuthenticatedUserId", () => {
-  it("should extract sub claim from API Gateway Cognito authorizer", () => {
+  it("shld extract sub claim from API Gateway Cognito authorizer", () => {
     const event = {
       requestContext: {
         authorizer: {
