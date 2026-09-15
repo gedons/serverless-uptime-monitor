@@ -61,6 +61,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'backend/package-lock.json'
 
+      - name: Install Backend Dependencies
+        run: npm ci
+        working-directory: backend
+
       - name: Setup AWS SAM CLI
         uses: aws-actions/setup-sam@v2
 
